@@ -1,0 +1,92 @@
+@startuml 11_add_event
+title Add Pet Event — POST /pets/{pet_id}/events
+
+skinparam sequenceArrowThickness 2
+skinparam roundcorner 8
+skinparam sequenceParticipantBorderColor #555555
+skinparam sequenceParticipantBackgroundColor #FAFAFA
+skinparam sequenceGroupBorderColor #999999
+skinparam noteBorderColor #BBBBBB
+skinparam noteBackgroundColor #FFFDE7
+
+actor Client
+
+box "Presentation" #EEF4FB
+  participant "pet_event_router" as Router
+  participant "get_current_user\n<<dependency>>" as AuthDep
+end box
+
+box "Application" #FFF8E1
+  participant "AddPetEventHandler" as Handler
+end box
+
+box "Domain" #F1F8E9
+  participant "EventTitle\n<<Value Object>>" as TitleVO
+  participant "EventDescription\n<<Value Object>>" as DescVO
+  participant "Pet\n<<Aggregate Root>>" as PetEntity
+  participant "PetEvent\n<<Entity>>" as EventEntity
+end box
+
+box "Infrastructure" #FBE9E7
+  participant "SqlitePetRepository" as PetRepo
+  participant "SqlitePetEventRepository" as EventRepo
+end box
+
+database "SQLite" as DB
+
+autonumber
+
+Client -> Router : POST /pets/{pet_id}/events\nAuthorization: Bearer eyJhbGci…\n{ "title": "Vet visit",\n  "description": "All clear" }
+
+Router -> Router : Validate {pet_id} UUID\nPydantic schema (title, description not blank)
+alt invalid UUID or blank fields
+  Router --> Client : 422 Unprocessable Entity
+else valid
+  Router -> AuthDep : resolve get_current_user(token)
+  alt token invalid
+    AuthDep --> Router : raises InvalidTokenException
+    Router --> Client : 401 Unauthorized
+  else token valid
+    AuthDep --> Router : current_user_id
+
+    Router -> Handler : AddPetEventCommand\n(pet_id, user_id, title, description)
+
+    Handler -> PetRepo : find_by_id(pet_id)
+    PetRepo -> DB : SELECT …
+    DB --> PetRepo : row or (no rows)
+
+    alt pet not found
+      Handler --> Router : raises PetNotFoundException
+      Router --> Client : 404 Not Found
+    else pet found
+      PetRepo --> Handler : pet
+
+      Handler -> PetEntity : pet.is_owned_by(current_user_id)
+      alt user is not an owner
+        Handler --> Router : raises PetAccessDeniedException
+        Router --> Client : 403 Forbidden
+      else user is an owner
+        Handler -> TitleVO : EventTitle(value="Vet visit")
+        TitleVO -> TitleVO : strip + validate non-empty
+        TitleVO --> Handler : EventTitle VO
+
+        Handler -> DescVO : EventDescription(value="All clear")
+        DescVO -> DescVO : strip + validate non-empty
+        DescVO --> Handler : EventDescription VO
+
+        Handler -> EventEntity : PetEvent.record(\n  pet_id, title, description)
+        note right of EventEntity : Assigns new UUID\nSets occurred_at = utcnow()
+        EventEntity --> Handler : event
+
+        Handler -> EventRepo : save(event)
+        EventRepo -> DB : INSERT INTO pet_events\n(id, pet_id, title, description, occurred_at)
+        DB --> EventRepo : OK
+
+        Handler --> Router : PetEventDto\n(id, pet_id, title, description, occurred_at)
+        Router --> Client : 201 Created\n{ "id", "pet_id", "title",\n  "description", "occurred_at" }
+      end
+    end
+  end
+end
+
+@enduml

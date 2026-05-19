@@ -1,0 +1,77 @@
+@startuml 08_delete_pet
+title Delete Pet — DELETE /pets/{id}
+
+skinparam sequenceArrowThickness 2
+skinparam roundcorner 8
+skinparam sequenceParticipantBorderColor #555555
+skinparam sequenceParticipantBackgroundColor #FAFAFA
+skinparam sequenceGroupBorderColor #999999
+skinparam noteBorderColor #BBBBBB
+skinparam noteBackgroundColor #FFFDE7
+
+actor Client
+
+box "Presentation" #EEF4FB
+  participant "pet_router" as Router
+  participant "get_current_user\n<<dependency>>" as AuthDep
+end box
+
+box "Application" #FFF8E1
+  participant "DeletePetHandler" as Handler
+end box
+
+box "Domain" #F1F8E9
+  participant "Pet\n<<Aggregate Root>>" as PetEntity
+end box
+
+box "Infrastructure" #FBE9E7
+  participant "SqlitePetRepository" as Repo
+end box
+
+database "SQLite" as DB
+
+autonumber
+
+Client -> Router : DELETE /pets/{id}\nAuthorization: Bearer eyJhbGci…
+
+Router -> Router : Validate {id} UUID
+alt invalid UUID
+  Router --> Client : 422 Unprocessable Entity
+else valid UUID
+  Router -> AuthDep : resolve get_current_user(token)
+  alt token invalid
+    AuthDep --> Router : raises InvalidTokenException
+    Router --> Client : 401 Unauthorized
+  else token valid
+    AuthDep --> Router : current_user_id
+
+    Router -> Handler : DeletePetCommand(pet_id, user_id)
+
+    Handler -> Repo : find_by_id(pet_id)
+    Repo -> DB : SELECT …
+    DB --> Repo : row or (no rows)
+
+    alt pet not found
+      Handler --> Router : raises PetNotFoundException
+      Router --> Client : 404 Not Found
+    else pet found
+      Repo --> Handler : pet
+
+      Handler -> PetEntity : pet.is_owned_by(current_user_id)
+      alt user is not an owner
+        Handler --> Router : raises PetAccessDeniedException
+        Router --> Client : 403 Forbidden
+      else user is an owner
+        Handler -> Repo : delete(pet_id)
+        Repo -> DB : DELETE FROM pet_events\nWHERE pet_id = ?\nDELETE FROM pet_owners\nWHERE pet_id = ?\nDELETE FROM pets\nWHERE id = ?
+        note right of DB : All associated events and\nownership records are removed\nin the same transaction.
+        DB --> Repo : OK
+
+        Handler --> Router : —
+        Router --> Client : 204 No Content
+      end
+    end
+  end
+end
+
+@enduml

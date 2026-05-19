@@ -1,0 +1,63 @@
+@startuml 02_login
+title Login — POST /auth/token
+
+skinparam sequenceArrowThickness 2
+skinparam roundcorner 8
+skinparam sequenceParticipantBorderColor #555555
+skinparam sequenceParticipantBackgroundColor #FAFAFA
+skinparam sequenceGroupBorderColor #999999
+skinparam noteBorderColor #BBBBBB
+skinparam noteBackgroundColor #FFFDE7
+
+actor Client
+
+box "Presentation" #EEF4FB
+  participant "auth_router" as Router
+end box
+
+box "Application" #FFF8E1
+  participant "AuthenticateUserHandler" as Handler
+end box
+
+box "Infrastructure" #FBE9E7
+  participant "BcryptPasswordService" as PwdSvc
+  participant "JwtTokenService" as TokenSvc
+  participant "SqliteUserRepository" as Repo
+end box
+
+database "SQLite" as DB
+
+autonumber
+
+Client -> Router : POST /auth/token\nContent-Type: application/x-www-form-urlencoded\nusername=alice&password=secret
+note right of Client : OAuth2 PasswordRequestForm\n(form-data, not JSON)
+
+Router -> Handler : AuthenticateUserCommand\n(username="alice", password="secret")
+
+Handler -> Repo : find_by_username("alice")
+Repo -> DB : SELECT id, password_hash FROM users\nWHERE username = 'alice'
+DB --> Repo : row or (no rows)
+
+alt user not found
+  Repo --> Handler : None
+  Handler --> Router : raises InvalidCredentialsException
+  Router --> Client : 401 Unauthorized\n{ "detail": "Invalid credentials" }
+else user found
+  Repo --> Handler : user
+
+  Handler -> PwdSvc : verify("secret", user.password_hash)
+  PwdSvc --> Handler : True / False
+
+  alt password incorrect
+    Handler --> Router : raises InvalidCredentialsException
+    Router --> Client : 401 Unauthorized\n{ "detail": "Invalid credentials" }
+  else password correct
+    Handler -> TokenSvc : create_token(user.id)
+    TokenSvc --> Handler : "eyJhbGciOiJIUzI1NiJ9…"
+
+    Handler --> Router : TokenDto\n(user_id, username, access_token, token_type)
+    Router --> Client : 200 OK\n{ "user_id", "username",\n  "access_token", "token_type": "bearer" }
+  end
+end
+
+@enduml

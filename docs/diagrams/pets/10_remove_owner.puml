@@ -1,0 +1,87 @@
+@startuml 10_remove_owner
+title Remove Owner — DELETE /pets/{id}/owners/{owner_id}
+
+skinparam sequenceArrowThickness 2
+skinparam roundcorner 8
+skinparam sequenceParticipantBorderColor #555555
+skinparam sequenceParticipantBackgroundColor #FAFAFA
+skinparam sequenceGroupBorderColor #999999
+skinparam noteBorderColor #BBBBBB
+skinparam noteBackgroundColor #FFFDE7
+
+actor Client
+
+box "Presentation" #EEF4FB
+  participant "pet_router" as Router
+  participant "get_current_user\n<<dependency>>" as AuthDep
+end box
+
+box "Application" #FFF8E1
+  participant "RemoveOwnerHandler" as Handler
+end box
+
+box "Domain" #F1F8E9
+  participant "Pet\n<<Aggregate Root>>" as PetEntity
+end box
+
+box "Infrastructure" #FBE9E7
+  participant "SqlitePetRepository" as Repo
+end box
+
+database "SQLite" as DB
+
+autonumber
+
+Client -> Router : DELETE /pets/{id}/owners/{owner_id}\nAuthorization: Bearer eyJhbGci…
+
+Router -> Router : Validate {id} and {owner_id} are valid UUIDs
+alt invalid UUID format
+  Router --> Client : 422 Unprocessable Entity
+else valid UUIDs
+  Router -> AuthDep : resolve get_current_user(token)
+  alt token invalid
+    AuthDep --> Router : raises InvalidTokenException
+    Router --> Client : 401 Unauthorized
+  else token valid
+    AuthDep --> Router : current_user_id
+
+    Router -> Handler : RemoveOwnerCommand\n(pet_id, requester_id, owner_id_to_remove)
+
+    Handler -> Repo : find_by_id(pet_id)
+    Repo -> DB : SELECT …
+    DB --> Repo : row or (no rows)
+
+    alt pet not found
+      Handler --> Router : raises PetNotFoundException
+      Router --> Client : 404 Not Found
+    else pet found
+      Repo --> Handler : pet
+
+      Handler -> PetEntity : pet.is_owned_by(current_user_id)
+      alt requester is not an owner
+        Handler --> Router : raises PetAccessDeniedException
+        Router --> Client : 403 Forbidden
+      else requester is an owner
+        Handler -> PetEntity : pet.remove_owner(owner_id_to_remove)
+
+        alt only one owner remains — removing would leave zero owners
+          PetEntity --> Handler : raises PetMustHaveAtLeastOneOwnerException
+          Handler --> Router : raises PetMustHaveAtLeastOneOwnerException
+          Router --> Client : 409 Conflict\n{ "detail": "A pet must have at least one owner" }
+        else removal is safe
+          PetEntity --> Handler : —
+          note right of PetEntity : owner_id_to_remove is removed\nfrom pet.owner_ids set.
+
+          Handler -> Repo : save(pet)
+          Repo -> DB : DELETE FROM pet_owners\nWHERE pet_id = ? AND owner_id = ?
+          DB --> Repo : OK
+
+          Handler --> Router : PetDto (updated owner_ids)
+          Router --> Client : 200 OK\n{ "id", "name", "last_name",\n  "type", "owner_ids": [remaining_owner_id] }
+        end
+      end
+    end
+  end
+end
+
+@enduml
