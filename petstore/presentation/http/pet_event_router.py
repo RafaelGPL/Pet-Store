@@ -17,8 +17,8 @@ from petstore.domain.exceptions.pet_exceptions import (
     PetEventNotFoundException,
     PetNotFoundException,
 )
-from petstore.infrastructure.persistence.sqlite_pet_event_repository import SqlitePetEventRepository
-from petstore.infrastructure.persistence.sqlite_pet_repository import SqlitePetRepository
+from petstore.infrastructure.persistence.sqlalchemy_pet_event_repository import SqlAlchemyPetEventRepository
+from petstore.infrastructure.persistence.sqlalchemy_pet_repository import SqlAlchemyPetRepository
 
 router = APIRouter(redirect_slashes=False)
 
@@ -72,12 +72,12 @@ class PetEventResponse(BaseModel):
 # --- dependency factories ---
 
 
-def _pet_repo() -> SqlitePetRepository:
-    return SqlitePetRepository()
+def _pet_repo() -> SqlAlchemyPetRepository:
+    return SqlAlchemyPetRepository()
 
 
-def _event_repo() -> SqlitePetEventRepository:
-    return SqlitePetEventRepository()
+def _event_repo() -> SqlAlchemyPetEventRepository:
+    return SqlAlchemyPetEventRepository()
 
 
 def _event_response(dto) -> PetEventResponse:

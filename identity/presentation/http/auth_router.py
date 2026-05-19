@@ -13,7 +13,7 @@ from identity.domain.exceptions.user_exceptions import (
     UserAlreadyExistsException,
     UserNotFoundException,
 )
-from identity.infrastructure.persistence.sqlite_user_repository import SqliteUserRepository
+from identity.infrastructure.persistence.sqlalchemy_user_repository import SqlAlchemyUserRepository
 from identity.infrastructure.security.bcrypt_password_service import BcryptPasswordService
 from identity.infrastructure.security.jwt_token_service import JwtTokenService
 from identity.presentation.http.dependencies import get_current_user_id
@@ -74,8 +74,8 @@ class MeResponse(BaseModel):
 # --- dependencies ---
 
 
-def _repo() -> SqliteUserRepository:
-    return SqliteUserRepository()
+def _repo() -> SqlAlchemyUserRepository:
+    return SqlAlchemyUserRepository()
 
 
 def _password_svc() -> BcryptPasswordService:
