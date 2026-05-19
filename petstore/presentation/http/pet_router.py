@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from identity.domain.exceptions.user_exceptions import UserNotFoundException
-from identity.infrastructure.persistence.sqlite_user_repository import SqliteUserRepository
+from identity.infrastructure.persistence.sqlalchemy_user_repository import SqlAlchemyUserRepository
 from identity.presentation.http.dependencies import get_current_user_id
 from petstore.application.commands.add_pet_owner_command import AddPetOwnerCommand
 from petstore.application.commands.delete_pet_command import DeletePetCommand
@@ -25,7 +25,7 @@ from petstore.domain.exceptions.pet_exceptions import (
     PetMustHaveAtLeastOneOwnerException,
     PetNotFoundException,
 )
-from petstore.infrastructure.persistence.sqlite_pet_repository import SqlitePetRepository
+from petstore.infrastructure.persistence.sqlalchemy_pet_repository import SqlAlchemyPetRepository
 
 router = APIRouter(prefix="/pets", tags=["pets"], redirect_slashes=False)
 
@@ -93,12 +93,12 @@ class PetResponse(BaseModel):
 # --- dependency factories ---
 
 
-def _pet_repo() -> SqlitePetRepository:
-    return SqlitePetRepository()
+def _pet_repo() -> SqlAlchemyPetRepository:
+    return SqlAlchemyPetRepository()
 
 
-def _user_repo() -> SqliteUserRepository:
-    return SqliteUserRepository()
+def _user_repo() -> SqlAlchemyUserRepository:
+    return SqlAlchemyUserRepository()
 
 
 def _pet_response(dto) -> PetResponse:

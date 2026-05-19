@@ -66,10 +66,12 @@ class TestMe:
 
     def test_deleted_user_returns_404(self, client, alice, alice_headers):
         """Token is valid but the user record has been removed — expect 404."""
+        from sqlalchemy import text
+
         from petstore.infrastructure.persistence.database import get_connection
 
         with get_connection() as conn:
-            conn.execute("DELETE FROM users")
+            conn.execute(text("DELETE FROM users"))
             conn.commit()
 
         r = client.get("/auth/me", headers=alice_headers)
