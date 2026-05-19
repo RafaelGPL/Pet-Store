@@ -1,0 +1,19 @@
+[run]
+source = .
+branch = true
+omit =
+    # Abstract interface contracts — bodies are intentionally never executed
+    */repositories/i_*.py
+    */services/i_*.py
+    # Package markers and test files
+    */__init__.py
+    tests/*
+    test_api.py
+    # CI / tooling
+    .github/*
+    conftest.py
+
+[report]
+fail_under = 100
+show_missing = true
+skip_covered = false
