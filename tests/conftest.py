@@ -6,7 +6,7 @@ Key design decisions:
 - BcryptPasswordService is patched to use 4 rounds (vs default 12) so the
   suite runs in seconds rather than minutes.
 - `initialise_schema()` is called via the FastAPI lifespan, so it always hits
-  the monkeypatched DB_PATH — no real database is ever created during tests.
+  the monkeypatched DATABASE_URL — no real database is ever created during tests.
 """
 
 import pytest
@@ -22,7 +22,8 @@ _FAST_CRYPT = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds
 @pytest.fixture(autouse=True)
 def _isolated_db(tmp_path, monkeypatch):
     """Redirect every DB connection to a per-test temp file and use fast bcrypt."""
-    monkeypatch.setattr(_db_module, "DB_PATH", tmp_path / "test.db")
+    _db_module._reset_engine()
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/test.db")
     monkeypatch.setattr(BcryptPasswordService, "_context", _FAST_CRYPT)
 
 
