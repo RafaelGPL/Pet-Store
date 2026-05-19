@@ -1,0 +1,75 @@
+@startuml 04_register_pet
+title Register Pet — POST /pets
+
+skinparam sequenceArrowThickness 2
+skinparam roundcorner 8
+skinparam sequenceParticipantBorderColor #555555
+skinparam sequenceParticipantBackgroundColor #FAFAFA
+skinparam sequenceGroupBorderColor #999999
+skinparam noteBorderColor #BBBBBB
+skinparam noteBackgroundColor #FFFDE7
+
+actor Client
+
+box "Presentation" #EEF4FB
+  participant "pet_router" as Router
+  participant "get_current_user\n<<dependency>>" as AuthDep
+end box
+
+box "Application" #FFF8E1
+  participant "RegisterPetHandler" as Handler
+end box
+
+box "Domain" #F1F8E9
+  participant "PetName\n<<Value Object>>" as PetNameVO
+  participant "PetType\n<<Value Object>>" as PetTypeVO
+  participant "Pet\n<<Aggregate Root>>" as PetEntity
+end box
+
+box "Infrastructure" #FBE9E7
+  participant "SqlitePetRepository" as Repo
+end box
+
+database "SQLite" as DB
+
+autonumber
+
+Client -> Router : POST /pets\nAuthorization: Bearer eyJhbGci…\n{ "name": "Whiskers",\n  "last_name": "McFluff", "type": "cat" }
+
+Router -> AuthDep : resolve get_current_user(token)
+alt token invalid
+  AuthDep --> Router : raises InvalidTokenException
+  Router --> Client : 401 Unauthorized
+else token valid
+  AuthDep --> Router : current_user_id
+
+  Router -> Router : Pydantic schema validation\n(name, last_name, type not blank)
+
+  alt schema invalid — blank fields
+    Router --> Client : 422 Unprocessable Entity
+  else schema valid
+    Router -> Handler : RegisterPetCommand\n(name, last_name, type, owner_id)
+
+    Handler -> PetNameVO : PetName(first="Whiskers", last="McFluff")
+    PetNameVO -> PetNameVO : strip whitespace\nvalidate non-empty first & last
+    PetNameVO --> Handler : PetName VO
+
+    Handler -> PetTypeVO : PetType(value="cat")
+    PetTypeVO -> PetTypeVO : strip + lowercase\nvalidate non-empty
+    PetTypeVO --> Handler : PetType VO
+
+    Handler -> PetEntity : Pet.register(\n  name=PetName,\n  type_=PetType,\n  initial_owner_id=current_user_id)
+    note right of PetEntity : Assigns new UUID\nSets owner_ids = [current_user_id]\nRaises PetRegisteredEvent
+    PetEntity --> Handler : pet
+
+    Handler -> Repo : save(pet)
+    Repo -> DB : INSERT INTO pets (id, name, last_name, type)\nINSERT INTO pet_owners (pet_id, owner_id)
+    DB --> Repo : OK
+    Repo --> Handler : —
+
+    Handler --> Router : PetDto\n(id, name, last_name, type, owner_ids)
+    Router --> Client : 201 Created\n{ "id", "name", "last_name",\n  "type", "owner_ids": [user_id] }
+  end
+end
+
+@enduml

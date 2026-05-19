@@ -1,0 +1,91 @@
+@startuml 07_update_pet
+title Update Pet — PATCH /pets/{id}
+
+skinparam sequenceArrowThickness 2
+skinparam roundcorner 8
+skinparam sequenceParticipantBorderColor #555555
+skinparam sequenceParticipantBackgroundColor #FAFAFA
+skinparam sequenceGroupBorderColor #999999
+skinparam noteBorderColor #BBBBBB
+skinparam noteBackgroundColor #FFFDE7
+
+actor Client
+
+box "Presentation" #EEF4FB
+  participant "pet_router" as Router
+  participant "get_current_user\n<<dependency>>" as AuthDep
+end box
+
+box "Application" #FFF8E1
+  participant "UpdatePetHandler" as Handler
+end box
+
+box "Domain" #F1F8E9
+  participant "PetName\n<<Value Object>>" as PetNameVO
+  participant "PetType\n<<Value Object>>" as PetTypeVO
+  participant "Pet\n<<Aggregate Root>>" as PetEntity
+end box
+
+box "Infrastructure" #FBE9E7
+  participant "SqlitePetRepository" as Repo
+end box
+
+database "SQLite" as DB
+
+autonumber
+
+Client -> Router : PATCH /pets/{id}\nAuthorization: Bearer eyJhbGci…\n{ "name"?: "Shadow",\n  "last_name"?: "Nightpaw",\n  "type"?: "panther" }
+note right of Client : All fields optional.\nOmitted fields are left unchanged.
+
+Router -> Router : Validate {id} UUID\nPydantic schema (no blank strings)
+alt invalid UUID or blank field value
+  Router --> Client : 422 Unprocessable Entity
+else valid
+  Router -> AuthDep : resolve get_current_user(token)
+  alt token invalid
+    AuthDep --> Router : raises InvalidTokenException
+    Router --> Client : 401 Unauthorized
+  else token valid
+    AuthDep --> Router : current_user_id
+
+    Router -> Handler : UpdatePetCommand\n(pet_id, user_id, name?, last_name?, type?)
+
+    Handler -> Repo : find_by_id(pet_id)
+    Repo -> DB : SELECT …
+    DB --> Repo : row or (no rows)
+
+    alt pet not found
+      Handler --> Router : raises PetNotFoundException
+      Router --> Client : 404 Not Found
+    else pet found
+      Repo --> Handler : pet
+
+      Handler -> PetEntity : pet.is_owned_by(current_user_id)
+      alt user is not an owner
+        Handler --> Router : raises PetAccessDeniedException
+        Router --> Client : 403 Forbidden
+      else user is an owner
+        opt name or last_name provided
+          Handler -> PetNameVO : PetName(\n  first = name ?? pet.name.first,\n  last  = last_name ?? pet.name.last)
+          PetNameVO --> Handler : PetName VO
+          Handler -> PetEntity : pet.rename(new_name)
+        end
+
+        opt type provided
+          Handler -> PetTypeVO : PetType(value=type)
+          PetTypeVO --> Handler : PetType VO
+          Handler -> PetEntity : pet.change_type(new_type)
+        end
+
+        Handler -> Repo : save(pet)
+        Repo -> DB : UPDATE pets SET name=?, last_name=?, type=?\nWHERE id=?
+        DB --> Repo : OK
+
+        Handler --> Router : PetDto (updated)
+        Router --> Client : 200 OK\n{ "id", "name", "last_name",\n  "type", "owner_ids" }
+      end
+    end
+  end
+end
+
+@enduml

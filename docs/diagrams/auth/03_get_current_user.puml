@@ -1,0 +1,65 @@
+@startuml 03_get_current_user
+title Get Current User — GET /auth/me
+
+skinparam sequenceArrowThickness 2
+skinparam roundcorner 8
+skinparam sequenceParticipantBorderColor #555555
+skinparam sequenceParticipantBackgroundColor #FAFAFA
+skinparam sequenceGroupBorderColor #999999
+skinparam noteBorderColor #BBBBBB
+skinparam noteBackgroundColor #FFFDE7
+
+actor Client
+
+box "Presentation" #EEF4FB
+  participant "auth_router" as Router
+  participant "get_current_user\n<<dependency>>" as AuthDep
+end box
+
+box "Application" #FFF8E1
+  participant "GetCurrentUserHandler" as Handler
+end box
+
+box "Infrastructure" #FBE9E7
+  participant "JwtTokenService" as TokenSvc
+  participant "SqliteUserRepository" as Repo
+end box
+
+database "SQLite" as DB
+
+autonumber
+
+Client -> Router : GET /auth/me\nAuthorization: Bearer eyJhbGci…
+
+Router -> AuthDep : resolve get_current_user(token)
+
+AuthDep -> TokenSvc : verify_token("eyJhbGci…")
+
+alt token missing or malformed
+  TokenSvc --> AuthDep : raises InvalidTokenException
+  AuthDep --> Router : raises InvalidTokenException
+  Router --> Client : 401 Unauthorized
+else token valid
+  TokenSvc --> AuthDep : user_id (UUID string)
+
+  AuthDep --> Router : current_user_id
+
+  Router -> Handler : GetCurrentUserQuery(user_id)
+
+  Handler -> Repo : find_by_id(user_id)
+  Repo -> DB : SELECT id, username FROM users\nWHERE id = ?
+  DB --> Repo : row or (no rows)
+
+  alt user record deleted (token valid but user removed)
+    Repo --> Handler : None
+    Handler --> Router : raises UserNotFoundException
+    Router --> Client : 404 Not Found
+  else user found
+    Repo --> Handler : user
+
+    Handler --> Router : UserDto\n(user_id, username)
+    Router --> Client : 200 OK\n{ "user_id", "username" }
+  end
+end
+
+@enduml

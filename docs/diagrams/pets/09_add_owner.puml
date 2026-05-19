@@ -1,0 +1,92 @@
+@startuml 09_add_owner
+title Add Owner — POST /pets/{id}/owners
+
+skinparam sequenceArrowThickness 2
+skinparam roundcorner 8
+skinparam sequenceParticipantBorderColor #555555
+skinparam sequenceParticipantBackgroundColor #FAFAFA
+skinparam sequenceGroupBorderColor #999999
+skinparam noteBorderColor #BBBBBB
+skinparam noteBackgroundColor #FFFDE7
+
+actor Client
+
+box "Presentation" #EEF4FB
+  participant "pet_router" as Router
+  participant "get_current_user\n<<dependency>>" as AuthDep
+end box
+
+box "Application" #FFF8E1
+  participant "AddOwnerHandler" as Handler
+end box
+
+box "Domain" #F1F8E9
+  participant "Pet\n<<Aggregate Root>>" as PetEntity
+end box
+
+box "Infrastructure" #FBE9E7
+  participant "SqlitePetRepository" as PetRepo
+  participant "SqliteUserRepository" as UserRepo
+end box
+
+database "SQLite" as DB
+
+autonumber
+
+Client -> Router : POST /pets/{id}/owners\nAuthorization: Bearer eyJhbGci…\n{ "username": "bob" }
+
+Router -> Router : Validate {id} UUID\nPydantic schema (username not blank)
+alt invalid UUID or blank username
+  Router --> Client : 422 Unprocessable Entity
+else valid
+  Router -> AuthDep : resolve get_current_user(token)
+  alt token invalid
+    AuthDep --> Router : raises InvalidTokenException
+    Router --> Client : 401 Unauthorized
+  else token valid
+    AuthDep --> Router : current_user_id
+
+    Router -> Handler : AddOwnerCommand\n(pet_id, requester_id, target_username)
+
+    Handler -> PetRepo : find_by_id(pet_id)
+    PetRepo -> DB : SELECT …
+    DB --> PetRepo : row or (no rows)
+
+    alt pet not found
+      Handler --> Router : raises PetNotFoundException
+      Router --> Client : 404 Not Found
+    else pet found
+      PetRepo --> Handler : pet
+
+      Handler -> PetEntity : pet.is_owned_by(current_user_id)
+      alt requester is not an owner
+        Handler --> Router : raises PetAccessDeniedException
+        Router --> Client : 403 Forbidden
+      else requester is an owner
+        Handler -> UserRepo : find_by_username("bob")
+        UserRepo -> DB : SELECT id FROM users\nWHERE username = 'bob'
+        DB --> UserRepo : row or (no rows)
+
+        alt target user not found
+          Handler --> Router : raises UserNotFoundException
+          Router --> Client : 404 Not Found
+        else target user found
+          UserRepo --> Handler : new_owner
+
+          Handler -> PetEntity : pet.add_owner(new_owner.id)
+          note right of PetEntity : Adds new_owner_id to\npet.owner_ids set.\nNo domain event raised.
+          PetEntity --> Handler : —
+
+          Handler -> PetRepo : save(pet)
+          PetRepo -> DB : INSERT INTO pet_owners\n(pet_id, owner_id)
+          DB --> PetRepo : OK
+
+          Handler --> Router : PetDto (updated owner_ids)
+          Router --> Client : 200 OK\n{ "id", "name", "last_name",\n  "type", "owner_ids": [alice_id, bob_id] }
+        end
+      end
+    end
+  end
+end
+
+@enduml
