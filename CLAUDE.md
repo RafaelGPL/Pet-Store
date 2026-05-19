@@ -105,3 +105,19 @@ This project uses **Git-Flow** as its branching and release convention. Always f
 ### Code Style
 
 All Python files are automatically formatted by **black** via a pre-commit hook. Never skip the pre-commit hook. If black reformats a file, review the diff before pushing.
+
+---
+
+## Environment Variables
+
+Secrets and local config live in a `.env` file at the project root (git-ignored).
+Before running any command that talks to GitHub (gh CLI, push, PR creation), load it:
+
+```bash
+export $(grep -v '^#' .env | xargs)
+```
+
+| Variable | Purpose |
+|---|---|
+| `GH_TOKEN` | GitHub Personal Access Token — used by `gh` CLI for PRs, repo settings, and API calls |
+| `JWT_SECRET_KEY` | Overrides the default JWT signing secret for the Pet Store API in production |

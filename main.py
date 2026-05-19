@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
 from identity.presentation.http.auth_router import router as auth_router
@@ -57,15 +59,22 @@ _TAGS = [
     },
 ]
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    initialise_schema()
+    yield
+
+
 app = FastAPI(
     title="Pet Store API",
     version="2.0.0",
     description=_DESCRIPTION,
     openapi_tags=_TAGS,
     license_info={"name": "MIT"},
+    lifespan=lifespan,
 )
 
-initialise_schema()
 app.include_router(auth_router)
 app.include_router(pet_router)
 app.include_router(pet_event_router)
