@@ -1,0 +1,75 @@
+@startuml 06_get_pet
+title Get Pet — GET /pets/{id}
+
+skinparam sequenceArrowThickness 2
+skinparam roundcorner 8
+skinparam sequenceParticipantBorderColor #555555
+skinparam sequenceParticipantBackgroundColor #FAFAFA
+skinparam sequenceGroupBorderColor #999999
+skinparam noteBorderColor #BBBBBB
+skinparam noteBackgroundColor #FFFDE7
+
+actor Client
+
+box "Presentation" #EEF4FB
+  participant "pet_router" as Router
+  participant "get_current_user\n<<dependency>>" as AuthDep
+end box
+
+box "Application" #FFF8E1
+  participant "GetPetHandler" as Handler
+end box
+
+box "Domain" #F1F8E9
+  participant "Pet\n<<Aggregate Root>>" as PetEntity
+end box
+
+box "Infrastructure" #FBE9E7
+  participant "SqlitePetRepository" as Repo
+end box
+
+database "SQLite" as DB
+
+autonumber
+
+Client -> Router : GET /pets/{id}\nAuthorization: Bearer eyJhbGci…
+
+Router -> Router : Validate {id} is a valid UUID
+alt invalid UUID format
+  Router --> Client : 422 Unprocessable Entity
+else valid UUID
+  Router -> AuthDep : resolve get_current_user(token)
+  alt token invalid
+    AuthDep --> Router : raises InvalidTokenException
+    Router --> Client : 401 Unauthorized
+  else token valid
+    AuthDep --> Router : current_user_id
+
+    Router -> Handler : GetPetQuery(pet_id, user_id)
+
+    Handler -> Repo : find_by_id(pet_id)
+    Repo -> DB : SELECT pets.*, pet_owners.owner_id\nFROM pets JOIN pet_owners…\nWHERE pets.id = ?
+    DB --> Repo : row or (no rows)
+
+    alt pet not found
+      Repo --> Handler : None
+      Handler --> Router : raises PetNotFoundException
+      Router --> Client : 404 Not Found
+    else pet found
+      Repo --> Handler : pet
+
+      Handler -> PetEntity : pet.is_owned_by(current_user_id)
+      PetEntity --> Handler : True / False
+
+      alt user is not an owner
+        Handler --> Router : raises PetAccessDeniedException
+        Router --> Client : 403 Forbidden
+      else user is an owner
+        Handler --> Router : PetDto\n(id, name, last_name, type, owner_ids)
+        Router --> Client : 200 OK\n{ "id", "name", "last_name",\n  "type", "owner_ids" }
+      end
+    end
+  end
+end
+
+@enduml

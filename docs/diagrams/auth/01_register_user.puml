@@ -1,0 +1,78 @@
+@startuml 01_register_user
+title Register User — POST /auth/register
+
+skinparam sequenceArrowThickness 2
+skinparam roundcorner 8
+skinparam sequenceParticipantBorderColor #555555
+skinparam sequenceParticipantBackgroundColor #FAFAFA
+skinparam sequenceGroupBorderColor #999999
+skinparam noteBorderColor #BBBBBB
+skinparam noteBackgroundColor #FFFDE7
+
+actor Client
+
+box "Presentation" #EEF4FB
+  participant "auth_router" as Router
+end box
+
+box "Application" #FFF8E1
+  participant "RegisterUserHandler" as Handler
+end box
+
+box "Domain" #F1F8E9
+  participant "Username\n<<Value Object>>" as UsernameVO
+  participant "User\n<<Entity>>" as UserEntity
+end box
+
+box "Infrastructure" #FBE9E7
+  participant "BcryptPasswordService" as PwdSvc
+  participant "JwtTokenService" as TokenSvc
+  participant "SqliteUserRepository" as Repo
+end box
+
+database "SQLite" as DB
+
+autonumber
+
+Client -> Router : POST /auth/register\n{ "username": "alice", "password": "secret" }
+
+Router -> Router : Pydantic schema validation\n(min_length=3, max_length=50,\nalphanumeric + _ -)
+
+alt schema invalid — blank / too short / too long / bad chars
+  Router --> Client : 422 Unprocessable Entity
+else schema valid
+  Router -> Handler : RegisterUserCommand\n(username="alice", password="secret")
+
+  Handler -> Repo : find_by_username("alice")
+  Repo -> DB : SELECT id FROM users\nWHERE username = 'alice'
+  DB --> Repo : (no rows)
+  Repo --> Handler : None
+
+  alt username already taken
+    Handler --> Router : raises UserAlreadyExistsException
+    Router --> Client : 409 Conflict
+  else username is free
+    Handler -> UsernameVO : Username(value="alice")
+    UsernameVO -> UsernameVO : strip whitespace\nlowercase\nvalidate length & chars
+    UsernameVO --> Handler : Username("alice")
+
+    Handler -> PwdSvc : hash("secret")
+    PwdSvc --> Handler : "$2b$12$…"
+
+    Handler -> UserEntity : User.register(\n  username=Username("alice"),\n  password_hash="$2b$12$…")
+    note right of UserEntity : Assigns new UUID\nNo domain events raised
+    UserEntity --> Handler : user
+
+    Handler -> Repo : save(user)
+    Repo -> DB : INSERT INTO users\n(id, username, password_hash)
+    DB --> Repo : OK
+
+    Handler -> TokenSvc : create_token(user.id)
+    TokenSvc --> Handler : "eyJhbGciOiJIUzI1NiJ9…"
+
+    Handler --> Router : TokenDto\n(user_id, username, access_token, token_type)
+    Router --> Client : 201 Created\n{ "user_id", "username",\n  "access_token", "token_type": "bearer" }
+  end
+end
+
+@enduml

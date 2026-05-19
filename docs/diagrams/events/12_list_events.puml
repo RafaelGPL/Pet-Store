@@ -1,0 +1,78 @@
+@startuml 12_list_events
+title List Pet Events — GET /pets/{pet_id}/events
+
+skinparam sequenceArrowThickness 2
+skinparam roundcorner 8
+skinparam sequenceParticipantBorderColor #555555
+skinparam sequenceParticipantBackgroundColor #FAFAFA
+skinparam sequenceGroupBorderColor #999999
+skinparam noteBorderColor #BBBBBB
+skinparam noteBackgroundColor #FFFDE7
+
+actor Client
+
+box "Presentation" #EEF4FB
+  participant "pet_event_router" as Router
+  participant "get_current_user\n<<dependency>>" as AuthDep
+end box
+
+box "Application" #FFF8E1
+  participant "ListPetEventsHandler" as Handler
+end box
+
+box "Domain" #F1F8E9
+  participant "Pet\n<<Aggregate Root>>" as PetEntity
+end box
+
+box "Infrastructure" #FBE9E7
+  participant "SqlitePetRepository" as PetRepo
+  participant "SqlitePetEventRepository" as EventRepo
+end box
+
+database "SQLite" as DB
+
+autonumber
+
+Client -> Router : GET /pets/{pet_id}/events\nAuthorization: Bearer eyJhbGci…
+
+Router -> Router : Validate {pet_id} UUID
+alt invalid UUID
+  Router --> Client : 422 Unprocessable Entity
+else valid UUID
+  Router -> AuthDep : resolve get_current_user(token)
+  alt token invalid
+    AuthDep --> Router : raises InvalidTokenException
+    Router --> Client : 401 Unauthorized
+  else token valid
+    AuthDep --> Router : current_user_id
+
+    Router -> Handler : ListPetEventsQuery(pet_id, user_id)
+
+    Handler -> PetRepo : find_by_id(pet_id)
+    PetRepo -> DB : SELECT …
+    DB --> PetRepo : row or (no rows)
+
+    alt pet not found
+      Handler --> Router : raises PetNotFoundException
+      Router --> Client : 404 Not Found
+    else pet found
+      PetRepo --> Handler : pet
+
+      Handler -> PetEntity : pet.is_owned_by(current_user_id)
+      alt user is not an owner
+        Handler --> Router : raises PetAccessDeniedException
+        Router --> Client : 403 Forbidden
+      else user is an owner
+        Handler -> EventRepo : find_by_pet(pet_id)
+        EventRepo -> DB : SELECT * FROM pet_events\nWHERE pet_id = ?\nORDER BY occurred_at ASC
+        DB --> EventRepo : rows (0 or more)
+        EventRepo --> Handler : [PetEvent, …]
+
+        Handler --> Router : [PetEventDto, …]
+        Router --> Client : 200 OK\n[ { "id", "pet_id", "title",\n    "description", "occurred_at" }, … ]\n(empty array if no events)
+      end
+    end
+  end
+end
+
+@enduml
