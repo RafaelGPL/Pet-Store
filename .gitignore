@@ -7,3 +7,6 @@ venv/
 dist/
 build/
 .env
+
+# Heroku — app-specific deployment details (app name, secrets)
+.heroku-setup.sh
