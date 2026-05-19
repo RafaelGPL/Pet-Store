@@ -1,0 +1,40 @@
+name: Render PlantUML diagrams
+
+on:
+  push:
+    branches: [main, develop, "feature/**"]
+    paths:
+      - "docs/diagrams/**/*.puml"
+  workflow_dispatch:
+
+jobs:
+  render:
+    name: Generate SVGs from .puml sources
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install PlantUML
+        run: sudo apt-get install -y plantuml
+
+      - name: Generate SVG diagrams
+        run: |
+          find docs/diagrams -name "*.puml" | while read f; do
+            plantuml -tsvg "$f"
+            echo "Rendered: $f"
+          done
+
+      - name: Commit generated SVGs
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/diagrams/**/*.svg
+          if git diff --staged --quiet; then
+            echo "No diagram changes — nothing to commit."
+          else
+            git commit -m "chore: regenerate PlantUML SVGs [skip ci]"
+            git push
+          fi
